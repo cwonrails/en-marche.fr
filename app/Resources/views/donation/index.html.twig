@@ -18,7 +18,7 @@
     </ul>
 
     <div class="donation__amount">
-        <form method="get" action="{{ path('donation_informations') }}">
+        <form method="get" action="{{ path('donation_index') }}">
             <h2>Je soutiens<br>En Marche !</h2>
             <span class="fluo">Vous êtes une majorité à donner 50€</span>
 
@@ -30,6 +30,9 @@
                    id="donation-amount"
                    class="form form__field form--full"
                    type="number" min="0.01" max="7500" step="0.01" value="{{ amount }}" />
+
+            <input type="checkbox" name="abonnement" id="donation-monthly"/>
+            <label for="donation-monthly">Je veux donner chaque mois ce montant</label>
 
             <button class="btn btn--large-and-medium btn--primary" type="submit">
                 Continuer

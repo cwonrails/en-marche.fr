@@ -2,8 +2,11 @@
 
 namespace AppBundle\Controller;
 
+use AppBundle\Donation\DonationTypeRequestFactory;
 use AppBundle\Entity\Donation;
+use AppBundle\Form\DonationFrequencyRequestType;
 use AppBundle\Form\DonationRequestType;
+use AppBundle\Form\DonationTypeRequestType;
 use Ramsey\Uuid\Uuid;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Method;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Route;
@@ -21,8 +24,50 @@ class DonationController extends Controller
      */
     public function indexAction(Request $request)
     {
+        $amount = $request->query->get('montant');
+        $isMonthlyPayment = $request->get('abonnement');
+
+        if ($amount) {
+            if ($isMonthlyPayment) {
+                return $this->redirectToRoute('donation_frequency', ['montant' => $amount]);
+            }
+
+            return $this->redirectToRoute('donation_informations', [
+                'montant' => $amount
+            ]);
+        }
+
         return $this->render('donation/index.html.twig', [
-            'amount' => (float) $request->query->get('montant', 50),
+            'amount' => (float)$request->query->get('montant', 50),
+        ]);
+    }
+
+    /**
+     * @Route("/frequence", name="donation_frequency")
+     */
+    public function monthlyPaymentAction(Request $request)
+    {
+        $amount = $request->query->get('montant');
+        if (!$amount) {
+            return $this->redirectToRoute('donation_index');
+        }
+
+        $factory = $this->get('app.donation_frequency_request.factory');
+        $donationFrequency = $factory->createFromRequest();
+
+        $form = $this->createForm(DonationFrequencyRequestType::class, $donationFrequency, [
+            'donation_frequency' => $this->getParameter('frequency')
+        ]);
+
+        if ($form->handleRequest($request)->isSubmitted() && $form->isValid()) {
+            return $this->redirectToRoute('donation_informations', [
+                'montant' => $amount,
+                'frequence' => $donationFrequency->getFrequency()
+            ]);
+        }
+
+        return $this->render('donation/frequency.html.twig', [
+            'form' => $form->createView()
         ]);
     }
 
@@ -32,7 +77,8 @@ class DonationController extends Controller
      */
     public function informationsAction(Request $request)
     {
-        $amount = (float) $request->query->get('montant');
+        $amount = (float)$request->query->get('montant');
+        $frequency = $request->query->get('frequence') ?? '01';
 
         if (!$amount) {
             return $this->redirectToRoute('donation_index');
@@ -40,6 +86,20 @@ class DonationController extends Controller
 
         $factory = $this->get('app.donation_request.factory');
         $donationRequest = $factory->createFromRequest($request, $amount, $this->getUser());
+
+        $factory = $this->get('app.donation_frequency_request.factory');
+        $donationFrequencyRequest = $factory->createFromRequest();
+        $donationFrequencyRequest->setFrequency($frequency);
+
+        if (count($this->get('validator')->validate($donationFrequencyRequest)) > 0) {
+
+            return $this->redirectToRoute('donation_frequency', [
+                'montant' => $amount
+            ]);
+        }
+
+        $donationRequest->setFrequency($donationFrequencyRequest->getFrequency());
+
         $form = $this->createForm(DonationRequestType::class, $donationRequest, ['locale' => $request->getLocale()]);
 
         if ($form->handleRequest($request)->isSubmitted() && $form->isValid()) {

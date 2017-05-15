@@ -5,8 +5,8 @@ namespace Tests\AppBundle\Controller;
 use AppBundle\Entity\Donation;
 use AppBundle\Mailjet\Message\DonationMessage;
 use AppBundle\Repository\DonationRepository;
-use Symfony\Bundle\FrameworkBundle\Client;
 use Goutte\Client as PayboxClient;
+use Symfony\Bundle\FrameworkBundle\Client;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Tests\AppBundle\SqliteWebTestCase;
@@ -27,16 +27,28 @@ class DonationControllerTest extends SqliteWebTestCase
     /* @var DonationRepository */
     private $donationRepository;
 
-    public function testFullProcess()
+
+    public function getFrequenciesDonation(): array
+    {
+        $frequencies = $this->getContainer()->getParameter('frequency');
+        $data = [['01']];
+        foreach ($frequencies as $frequency) {
+            $data[] = [$frequency];
+        }
+
+        return $data;
+    }
+
+    /**
+     * @dataProvider getFrequenciesDonation
+     */
+    public function testFullProcess(string $frequency)
     {
         $appClient = $this->appClient;
         // There should not be any donation for the moment
         $this->assertCount(0, $this->donationRepository->findAll());
 
-        /*
-         * Initial questions page
-         */
-        $crawler = $appClient->request(Request::METHOD_GET, '/don/coordonnees?montant=30');
+        $crawler = $appClient->request(Request::METHOD_GET, sprintf('/don/coordonnees?montant=30&frequence=%s', $frequency));
 
         $this->assertResponseStatusCode(Response::HTTP_OK, $appClient->getResponse());
 
@@ -73,6 +85,7 @@ class DonationControllerTest extends SqliteWebTestCase
         $this->assertSame('9 rue du Lycée', $donation->getAddress());
         $this->assertSame(33, $donation->getPhone()->getCountryCode());
         $this->assertSame('401020304', $donation->getPhone()->getNationalNumber());
+        $this->assertSame($frequency, $donation->getFrequency());
 
         // Email should not have been sent
         $this->assertCount(0, $this->getMailjetEmailRepository()->findMessages(DonationMessage::class));
@@ -83,6 +96,20 @@ class DonationControllerTest extends SqliteWebTestCase
         $crawler = $appClient->followRedirect();
 
         $this->assertResponseStatusCode(Response::HTTP_OK, $appClient->getResponse());
+
+        $formNode = $crawler->filter('input[name=PBX_CMD]');
+
+        if ('01' !== $donation->getFrequency()) {
+            switch ($donation->getFrequency()) {
+                case '00' :
+                    $frequencyExpected = '00';
+                    break;
+                default:
+                    $frequencyExpected = str_pad(intval($donation->getFrequency()) - 1, 2, '0', STR_PAD_LEFT);
+            }
+
+            $this->assertContains(sprintf('PBX_2MONT0000003000PBX_NBPAIE%sPBX_FREQ01PBX_QUAND00', $frequencyExpected), $formNode->attr('value'));
+        }
 
         /*
          * En-Marche payment page (verification and form to Paybox)
@@ -110,14 +137,14 @@ class DonationControllerTest extends SqliteWebTestCase
         $content = $this->payboxClient->getInternalResponse()->getContent();
 
         // Check payment was successful
-        $this->assertSame(1, $crawler->filter('td:contains("30.00 EUR")')->count());
+        $this->assertSame('01' === $donation->getFrequency() ? 1 : 2, $crawler->filter('td:contains("30.00 EUR")')->count());
         $this->assertContains('Paiement r&eacute;alis&eacute; avec succ&egrave;s', $content);
 
         /*
          * Emulate IPN callback to Symfony
          */
         $mockUrl = $crawler->filter('a')->first()->attr('href');
-        $ipnUrl = str_replace('https://httpbin.org/status/200', '/don/payment-ipn/'.$formTime, $mockUrl);
+        $ipnUrl = str_replace('https://httpbin.org/status/200', '/don/payment-ipn/' . $formTime, $mockUrl);
 
         $appClient->request(Request::METHOD_GET, $ipnUrl);
 
